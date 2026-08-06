@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 
 # Replace YOUR-GITHUB-USERNAME and repository name before publishing.
-Sitemap: https://YOUR-GITHUB-USERNAME.github.io/YOUR-REPOSITORY/sitemap.xml
+Sitemap: https://connect2sazad.github.io/connect2sazad.github.io/sitemap.xml
