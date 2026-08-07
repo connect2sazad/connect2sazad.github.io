@@ -1,23 +1,448 @@
 ---
 slug: debugging-deployment-pipelines-methodically
 title: How I Debug Deployment Pipelines Without Guessing
-excerpt: A failed pipeline is not one problem. It is a chain of stages, and the fastest fix comes from isolating the failed layer.
-date: 2026-07-18
-readTime: 5 min read
+excerpt: A deployment pipeline is a chain of environments, network paths, credentials, hosts, and services. My debugging method is simple: find the first broken layer, prove it with evidence, and only then move deeper.
+date: 2026-08-07
+readTime: 9 min read
 category: Troubleshooting
-tags: [CI/CD, Linux, Debugging]
+tags: [CI/CD, DevOps, Linux, Debugging, GitLab CI, Terraform, Ansible]
 ---
 
-Randomly changing YAML, permissions and firewall rules usually makes a deployment failure harder to understand. I debug from the outside inward and prove each layer before moving to the next.
+A failed deployment pipeline can make almost anything look guilty.
 
-# Start with the pipeline environment
+The YAML looks suspicious. The SSH key might be wrong. The security group could be blocking traffic. Maybe Ansible failed. Maybe Docker did not start. Maybe the application is unhealthy.
 
-Check the runner image, installed tools, working directory, variables and credentials. A command that works locally may fail because the runner is a different operating environment.
+The worst response is to start changing all of them.
 
-# Then verify connectivity
+I used to think faster debugging meant trying fixes quickly. In practice, that creates more variables and destroys useful evidence. The method that works better for me is much less dramatic: **identify the exact layer that failed, prove why it failed, and change one thing at a time.**
 
-Resolve DNS, confirm routing, check security groups, test the port and verify the SSH user and key. Do not troubleshoot an application before proving that the deployment system can reach the host.
+![Deployment debugging layers](../assets/blog-posts/deployment-debugging-layers.png)
 
-# Finally inspect the service
+# A pipeline failure is rarely "just a pipeline failure"
 
-Check process status, logs, listening ports, ownership, permissions and configuration syntax. The objective is to replace assumptions with evidence at every step.
+When a CI/CD job ends in red, the visible error is often only the place where the problem finally became impossible to ignore.
+
+A deployment may pass through several layers:
+
+1. Source repository
+2. CI runner
+3. Build environment
+4. Variables and secrets
+5. Cloud or network connectivity
+6. SSH or API authentication
+7. Target server
+8. Configuration management
+9. Containers or system services
+10. Application health checks
+
+If I jump directly to the application while the runner cannot even reach the server, I am debugging the wrong system.
+
+That is why my first question is not:
+
+> "What should I change?"
+
+It is:
+
+> **"What is the first step that does not behave as expected?"**
+
+# 1. I start with the failed command, not the entire log
+
+Large pipeline logs are noisy. One failed command can produce dozens of secondary messages.
+
+I first locate:
+
+- the stage that failed;
+- the job that failed;
+- the exact command that returned a non-zero exit code;
+- the first meaningful error before the cascade of failures.
+
+For example, if a deployment job contains:
+
+```bash
+terraform apply
+ansible-playbook deploy.yml
+ssh ubuntu@server "docker compose up -d"
+curl -f http://server/health
+```
+
+and the SSH command fails, I do not start inspecting the health endpoint. The pipeline has not reached that layer yet.
+
+The failed command defines the current debugging boundary.
+
+# 2. I verify the runner environment
+
+One of the easiest mistakes is assuming that the CI runner behaves like my laptop.
+
+It may not.
+
+The runner may use a different:
+
+- operating system;
+- Docker image;
+- shell;
+- working directory;
+- Terraform version;
+- Ansible version;
+- Python version;
+- SSH client;
+- environment variable scope.
+
+So I verify the environment before blaming the deployment target.
+
+Useful checks include:
+
+```bash
+pwd
+whoami
+uname -a
+env | sort
+which terraform
+terraform version
+which ansible
+ansible --version
+which ssh
+ssh -V
+```
+
+For sensitive variables, I never print the actual secret just to prove that it exists. I check whether the variable is populated without exposing its value.
+
+```bash
+test -n "$SSH_PRIVATE_KEY" && echo "SSH key variable exists"
+```
+
+This distinction matters because **"works on my machine" is not evidence that it works inside the runner**.
+
+# 3. I separate authentication from connectivity
+
+An SSH failure does not automatically mean the SSH key is wrong.
+
+Before touching credentials, I check whether the runner can actually reach the host.
+
+My order is usually:
+
+```bash
+getent hosts example.com
+```
+
+then:
+
+```bash
+nc -zv example.com 22
+```
+
+and only after the network path is proven do I test SSH:
+
+```bash
+ssh -vvv ubuntu@example.com
+```
+
+That separates three different classes of failure:
+
+- DNS cannot resolve the host;
+- the network cannot reach the port;
+- the network works, but authentication fails.
+
+These problems may look similar from the pipeline, but they require completely different fixes.
+
+# 4. I verify cloud networking before changing the server
+
+When deploying to AWS, I check the path between the runner and the instance.
+
+That normally means validating:
+
+- instance state;
+- public or private IP being used;
+- route table;
+- internet/NAT path where applicable;
+- security group rules;
+- network ACLs when relevant;
+- listening port on the instance.
+
+A common debugging mistake is opening more ports because "it might be the firewall."
+
+That is not debugging. That is guessing while also increasing the attack surface.
+
+I want evidence that a specific connection is being blocked before I change a rule.
+
+![CI/CD deployment chain](../assets/blog-posts/cicd-deployment-chain.png)
+
+# 5. Once SSH works, I inspect the host itself
+
+Reaching the server only proves that the network and authentication layers work.
+
+Now I check whether the host is healthy enough to perform the deployment.
+
+Some of my first commands are:
+
+```bash
+uptime
+free -h
+df -h
+df -i
+systemctl --failed
+ps aux --sort=-%mem | head
+ps aux --sort=-%cpu | head
+```
+
+I also check whether the expected port is already occupied:
+
+```bash
+sudo ss -lntp
+```
+
+This has caught problems where automation tried to start a service on a port already used by another process.
+
+Without checking the listening sockets, it is easy to waste time rewriting service configuration when the real problem is simply a port conflict.
+
+# 6. For Ansible failures, I identify the exact task
+
+When Ansible fails, I do not treat the entire playbook as broken.
+
+I identify:
+
+- which host failed;
+- which role failed;
+- which task failed;
+- the module return message;
+- whether the task changed anything before failing.
+
+Then I reproduce the smallest relevant check.
+
+If a service task fails:
+
+```yaml
+- name: Start nginx
+  ansible.builtin.service:
+    name: nginx
+    state: started
+```
+
+I inspect the service directly:
+
+```bash
+sudo systemctl status nginx
+sudo journalctl -u nginx --no-pager -n 100
+sudo nginx -t
+```
+
+The Ansible error tells me **where automation noticed the failure**. The service logs usually tell me **why the service actually failed**.
+
+# 7. I check permissions before rewriting configuration
+
+Permissions are responsible for a surprising number of deployment problems.
+
+A process can exist, its configuration can be valid, and the network can be fine — yet the application still fails because the service user cannot read or write something it needs.
+
+I check:
+
+```bash
+ls -lah
+namei -l /path/to/application
+stat /path/to/application
+ps aux | grep nginx
+ps aux | grep php-fpm
+```
+
+The important question is not simply "What permissions does this file have?"
+
+It is:
+
+**Which user is running the process, and does that user have the required access across the complete path?**
+
+That is especially important with Nginx, PHP-FPM, application upload directories, caches, logs, deployment artifacts, and mounted volumes.
+
+# 8. I inspect service status, logs, ports, then configuration
+
+For a failed service, I follow a predictable sequence.
+
+First:
+
+```bash
+systemctl status <service>
+```
+
+Then:
+
+```bash
+journalctl -u <service> -n 100 --no-pager
+```
+
+Then:
+
+```bash
+ss -lntp
+```
+
+Then I validate configuration using the service's own syntax checker when available.
+
+Examples:
+
+```bash
+nginx -t
+apachectl configtest
+docker compose config
+```
+
+This order prevents me from editing configuration files before I even know whether configuration is the problem.
+
+# 9. I treat Docker as another layer
+
+"Container is running" does not mean "application is healthy."
+
+I distinguish between:
+
+- Docker daemon health;
+- container creation;
+- container running state;
+- application process inside the container;
+- exposed/listening port;
+- host port mapping;
+- application health.
+
+My usual checks are:
+
+```bash
+docker ps -a
+docker logs <container>
+docker inspect <container>
+docker stats --no-stream
+docker compose ps
+docker compose logs --tail=100
+```
+
+If the container exits immediately, I care about its logs.
+
+If it stays running but the application is unreachable, I care about ports, bindings, health checks, reverse proxy configuration, and the application process.
+
+# 10. I do not trust "deployed successfully" until I test the result
+
+A successful deployment command is not the same as a successful deployment.
+
+The final state matters.
+
+I verify it from the outside whenever possible:
+
+```bash
+curl -I https://example.com
+curl -f https://example.com/health
+```
+
+Depending on the system, I may also verify:
+
+- expected HTTP status;
+- application response;
+- database connectivity;
+- metrics endpoint;
+- Prometheus target status;
+- container health;
+- service restart persistence.
+
+The pipeline should eventually automate these checks, but during debugging I want to know exactly which validation fails.
+
+# The debugging loop I try to follow
+
+![Evidence-driven debugging loop](../assets/blog-posts/evidence-driven-debugging-loop.png)
+
+My process is basically:
+
+**Observe → form one hypothesis → run one test → collect evidence → repeat.**
+
+The important part is **one hypothesis and one test**.
+
+Suppose Nginx returns a 502 error.
+
+Changing Nginx configuration, PHP-FPM permissions, firewall rules, and application environment variables at the same time may accidentally fix the problem — but I learn almost nothing.
+
+Instead, I might first check:
+
+```bash
+sudo systemctl status php8.3-fpm
+```
+
+If it is running, I check the socket:
+
+```bash
+sudo ss -lx | grep php
+```
+
+Then I compare that socket with the Nginx `fastcgi_pass` configuration.
+
+Each result determines the next test.
+
+That is slower than guessing for the first two minutes and much faster over the next thirty.
+
+# What I avoid during an incident
+
+There are a few habits I actively try to avoid:
+
+- randomly editing `.gitlab-ci.yml`;
+- repeatedly rerunning the same failed pipeline without changing the hypothesis;
+- opening firewall ports "temporarily" without proving a network problem;
+- using `chmod 777` as a debugging strategy;
+- restarting every service and destroying the original evidence;
+- changing multiple variables at once;
+- assuming the final error line is the root cause;
+- debugging the application before proving that the deployment reached it.
+
+These actions can make the system look different without making the problem better understood.
+
+# My practical deployment debugging checklist
+
+When a deployment fails, I work through this order:
+
+```text
+1. Which pipeline stage failed?
+2. Which exact command failed?
+3. Is the runner environment correct?
+4. Are required variables and credentials present?
+5. Does DNS resolve correctly?
+6. Is the target port reachable?
+7. Does authentication work?
+8. Is the target host healthy?
+9. Is another process using the required port?
+10. Which automation task failed?
+11. What do the service/application logs say?
+12. Are ownership and permissions correct?
+13. Is the configuration syntactically valid?
+14. Is the service listening where expected?
+15. Is the container/process actually healthy?
+16. Does an external health check succeed?
+```
+
+I do not necessarily run every check. I stop at the first failed layer and investigate there.
+
+# A real lesson from infrastructure automation
+
+While working with Terraform, Ansible, Docker, and CI/CD pipelines, I have repeatedly seen the same pattern:
+
+**automation does not remove failure — it makes failure repeatable.**
+
+That is useful.
+
+If a pipeline fails consistently at the same task, I have a reproducible problem. A reproducible problem can be isolated, tested, and fixed.
+
+The dangerous situation is when I respond to that reproducibility by making random changes until the pipeline becomes green.
+
+A green pipeline tells me that the latest run succeeded.
+
+A methodical debugging process tells me **why the previous run failed and why the fix works**.
+
+# Final thought
+
+The biggest improvement in my deployment debugging did not come from memorizing more Linux commands.
+
+It came from changing the question.
+
+Instead of asking:
+
+> "What could be wrong?"
+
+I ask:
+
+> **"What can I prove is working, and what is the first thing I can prove is not?"**
+
+That turns a large deployment failure into a much smaller problem.
+
+And once the failed layer is isolated, the commands, logs, and tools become much more useful.
+
+**Debug the path. Prove each layer. Change one variable at a time.**
