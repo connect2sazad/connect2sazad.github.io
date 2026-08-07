@@ -1,4 +1,5 @@
 'use strict';
+// Updated to support Markdown content stored in either .md or .txt post files.
 const $ = (s) => document.querySelector(s);
 const root = document.documentElement;
 const STORAGE_KEY = 'sazad-portfolio-appearance-v4';
@@ -20,7 +21,7 @@ function parsePost(source) {
   const parts = source.replace(/^\uFEFF/, '').match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/); if (!parts) throw new Error('Post front matter missing');
   const post = {tags:[], markdown:parts[2].trim()}; parts[1].split(/\r?\n/).forEach(line => { const i=line.indexOf(':'); if(i<0)return; const k=line.slice(0,i).trim(),v=line.slice(i+1).trim().replace(/^['"]|['"]$/g,''); post[k]=k==='tags'?v.replace(/^\[|\]$/g,'').split(',').map(x=>x.trim()).filter(Boolean):v; }); return post;
 }
-async function loadPosts() { const names=await getJSON('data/posts/index.json'); if(!Array.isArray(names))throw new Error('Post index must be a JSON array'); const posts=await Promise.all(names.map(async name=>{if(!/^[\w.-]+\.md$/.test(name))throw new Error('Invalid post filename');const p=parsePost(await getText(`data/posts/${name}`));p.slug=p.slug||name.replace(/\.md$/,'');return p;})); return posts.sort((a,b)=>String(b.date).localeCompare(String(a.date))); }
+async function loadPosts() { const names=await getJSON('data/posts/index.json'); if(!Array.isArray(names))throw new Error('Post index must be a JSON array'); const posts=await Promise.all(names.map(async name=>{if(!/^[\w.-]+\.(?:md|txt)$/i.test(name))throw new Error(`Invalid post filename: ${name}`);const p=parsePost(await getText(`data/posts/${name}`));p.slug=p.slug||name.replace(/\.(?:md|txt)$/i,'');return p;})); return posts.sort((a,b)=>String(b.date).localeCompare(String(a.date))); }
 function resolveMarkdownURL(value = '', context = null, image = false) {
   const url = String(value).trim().replace(/^<|>$/g, '');
   if (/^(https?:|mailto:|tel:|data:image\/)/i.test(url) || url.startsWith('#')) return url;
