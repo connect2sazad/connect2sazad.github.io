@@ -37,10 +37,10 @@ Repeatable WordPress deployment on AWS using Terraform, Ansible and Docker, with
 
 A digital complaint-management platform featuring PHP REST APIs, AWS hosting and Jenkins-based deployment automation.
 
+---
+
 ## Connect With Me
 
 - [LinkedIn](https://www.linkedin.com/in/connect2sazad)
 - [GitHub](https://github.com/connect2sazad)
 - [Email](mailto:mail2sazad@gmail.com)
-
----
