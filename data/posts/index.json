@@ -1,5 +1,5 @@
 [
-  "building-monitoring-platform-terraform-ansible.md",
-  "terraform-vs-ansible-responsibilities.md",
-  "debugging-deployment-pipelines-methodically.md"
+  "building-monitoring-platform-terraform-ansible.txt",
+  "terraform-vs-ansible-responsibilities.txt",
+  "debugging-deployment-pipelines-methodically.txt"
 ]
