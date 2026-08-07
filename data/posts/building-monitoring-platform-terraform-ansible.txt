@@ -2,8 +2,8 @@
 slug: building-monitoring-platform-terraform-ansible
 title: Building an Infrastructure Monitoring Platform with Terraform and Ansible
 excerpt: How I separated infrastructure provisioning, server configuration and monitoring deployment into one repeatable workflow.
-date: 2026-07-26
-readTime: 6 min read
+date: 2026-08-07
+readTime: 10 min read
 category: DevOps
 tags: [Terraform, Ansible, Prometheus, Grafana]
 ---
@@ -21,3 +21,110 @@ Terraform owns infrastructure state. Ansible owns operating-system and applicati
 # The important lesson
 
 Automation is not complete when a container starts. The pipeline also needs validation: connectivity checks, configuration validation, service health checks and alert testing. I verified alerting by intentionally stopping Apache on a target server and confirming the alert path.
+
+
+# Project architecture
+
+The platform separates infrastructure provisioning from server and application configuration. Terraform owns the AWS infrastructure, while Ansible owns the configuration applied after those resources exist.
+
+![Infrastructure Monitoring Platform Architecture](../assets/blog-posts/monitoring-platform-architecture.png)
+
+# Separation of responsibilities
+
+Terraform provisions the network, security groups and instances. Ansible discovers the servers, prepares them and deploys the monitoring components and exporters. GitLab CI/CD coordinates the workflow so each layer can be validated independently.
+
+![Terraform and Ansible Responsibilities](../assets/blog-posts/terraform-ansible-responsibilities.png)
+
+This separation makes failures easier to isolate. An infrastructure problem belongs in the Terraform layer. A package, configuration or service problem belongs in the Ansible or application layer.
+
+# Monitoring components
+
+The monitoring server runs Prometheus, Alertmanager and Grafana. Target web servers expose infrastructure and application metrics through exporters.
+
+Node Exporter provides Linux host metrics such as CPU, memory, filesystem and network information. Apache Exporter adds web-server-specific visibility. cAdvisor provides container-level metrics.
+
+Prometheus scrapes these targets and evaluates alerting rules. Alertmanager handles firing alerts, while Grafana provides dashboards for understanding the collected metrics.
+
+![Prometheus Alertmanager Grafana Flow](../assets/blog-posts/prometheus-alertmanager-grafana-flow.png)
+
+# Dynamic inventory
+
+One problem with automated infrastructure is that servers can be created and destroyed, so maintaining IP addresses manually quickly becomes fragile.
+
+I used AWS EC2 dynamic inventory so Ansible could discover instances and group them according to their role. This allowed the configuration layer to follow the infrastructure created by Terraform instead of maintaining a separate static server list.
+
+# Pipeline workflow
+
+GitLab CI/CD coordinates the deployment workflow. The pipeline can validate Terraform, create the infrastructure, verify inventory discovery and then run the configuration and monitoring deployment steps.
+
+A simplified flow is:
+
+```text
+Terraform Init
+      ↓
+Terraform Format / Validate
+      ↓
+Terraform Plan
+      ↓
+Terraform Apply
+      ↓
+AWS Infrastructure
+      ↓
+Ansible Dynamic Inventory
+      ↓
+Server Configuration
+      ↓
+Monitoring Stack
+      ↓
+Validation
+```
+
+The stage boundaries also make troubleshooting easier because a failure can be isolated to a specific layer instead of treating the whole deployment as one operation.
+
+# Validation matters
+
+A container starting successfully does not prove that monitoring works.
+
+I included checks around connectivity, configuration validity, service health and monitoring targets. Prometheus configuration can be validated before it is accepted, and exporter endpoints can be checked before the deployment is considered successful.
+
+The most important test was deliberately creating a failure.
+
+I stopped Apache on a monitored target and verified that the monitoring path reacted as expected:
+
+```text
+Apache stops
+      ↓
+Service/exporter condition changes
+      ↓
+Prometheus evaluates the alert rule
+      ↓
+Alert becomes FIRING
+      ↓
+Alertmanager receives it
+```
+
+That test proved more than simply seeing green dashboards. It demonstrated that the monitoring platform could detect a real service failure.
+
+# What I learned
+
+This project reinforced a principle I now use when designing automation: **each tool should have a clear responsibility.**
+
+Terraform answers: *What infrastructure should exist?*
+
+Ansible answers: *How should those machines be configured?*
+
+Prometheus answers: *What is happening across the infrastructure?*
+
+Alertmanager answers: *Which conditions require attention?*
+
+Grafana answers: *How can those metrics be understood visually?*
+
+GitLab CI/CD connects those responsibilities into a repeatable workflow.
+
+The final result was not just a Prometheus and Grafana installation. It was an infrastructure monitoring platform that could be provisioned, configured, validated and rebuilt through code.
+
+# Project presentation
+
+The complete presentation covers the architecture, Terraform infrastructure, Ansible automation, monitoring stack, CI/CD workflow, challenges and future improvements.
+
+**[View the Prometheus + Grafana Infrastructure Setup Presentation](../assets/presentations/Prometheus-Grafana-Infra-Setup-using-Terraform.pptx)**
