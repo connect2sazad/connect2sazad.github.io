@@ -25,7 +25,13 @@ async function loadPosts() { const names=await getJSON('data/posts/index.json');
 function resolveMarkdownURL(value = '', context = null, image = false) {
   const url = String(value).trim().replace(/^<|>$/g, '');
   if (/^(https?:|mailto:|tel:|data:image\/)/i.test(url) || url.startsWith('#')) return url;
-  if (!context) return safeURL(url);
+  // Blog posts are stored under data/posts but displayed by a root HTML page.
+  // Their author-facing ../assets/... paths therefore need to be normalized
+  // to the site's root assets directory before safeURL validates them.
+  if (!context) {
+    const localURL = url.replace(/^(?:\.\.\/)+(?=assets\/)/, '');
+    return safeURL(localURL);
+  }
   const pathEnd = url.search(/[?#]/);
   const rawPath = pathEnd < 0 ? url : url.slice(0, pathEnd);
   const suffix = pathEnd < 0 ? '' : url.slice(pathEnd);
