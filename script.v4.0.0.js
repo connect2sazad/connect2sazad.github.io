@@ -29,7 +29,7 @@ function resolveMarkdownURL(value = '', context = null, image = false) {
   const pathEnd = url.search(/[?#]/);
   const rawPath = pathEnd < 0 ? url : url.slice(0, pathEnd);
   const suffix = pathEnd < 0 ? '' : url.slice(pathEnd);
-  const clean = rawPath.replace(/^\.\//, '').replace(/^\//, '');
+  const clean = `${context.currentDir || ''}/${rawPath.replace(/^\.\//, '').replace(/^\//, '')}`.replace(/^\//, '');
   const encoded = clean.split('/').filter(Boolean).map(encodeURIComponent).join('/');
   return `${image ? context.rawBase : context.browseBase}/${encoded}${suffix}`;
 }
@@ -40,14 +40,27 @@ function renderMarkdown(md = '', context = null) {
     value = value.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g, (_, label, url) => `<a href="${escapeHTML(resolveMarkdownURL(url, context, false))}" target="_blank" rel="noreferrer">${label}</a>`);
     return value.replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\*([^*]+)\*/g,'<em>$1</em>');
   };
-  const table = block => {
-    const rows=block.split('\n').filter(Boolean), split=row=>row.trim().replace(/^\||\|$/g,'').split('|').map(cell=>cell.trim());
-    if(rows.length<2||!/^[\s|:=-]+$/.test(rows[1])||!split(rows[1]).every(cell=>/^:?-{3,}:?$/.test(cell)))return null;
-    const heads=split(rows[0]), aligns=split(rows[1]).map(cell=>cell.startsWith(':')&&cell.endsWith(':')?'center':cell.endsWith(':')?'right':'left');
-    const body=rows.slice(2).map(row=>`<tr>${split(row).map((cell,i)=>`<td style="text-align:${aligns[i]||'left'}">${inline(cell)}</td>`).join('')}</tr>`).join('');
-    return `<div class="markdown-table-wrap"><table><thead><tr>${heads.map((cell,i)=>`<th style="text-align:${aligns[i]||'left'}">${inline(cell)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+  const splitRow = row => {
+    const cells=[]; let cell='', escaped=false, code=false;
+    const source=row.trim().replace(/^\|/,'').replace(/\|$/,'');
+    for(const char of source){if(escaped){cell+=char;escaped=false;}else if(char==='\\'){escaped=true;cell+=char;}else if(char==='`'){code=!code;cell+=char;}else if(char==='|'&&!code){cells.push(cell.trim());cell='';}else cell+=char;}
+    cells.push(cell.trim()); return cells;
   };
-  return md.replace(/\r/g,'').split(/\n{2,}/).map(b=>{const renderedTable=table(b);if(renderedTable)return renderedTable;const h=b.match(/^(#{1,6})\s+([\s\S]+)$/);if(h){const n=Math.min(h[1].length+1,6);return `<h${n}>${inline(h[2])}</h${n}>`;}if(/^!\[.*\]\(.+\)$/.test(b))return `<figure>${inline(b)}</figure>`;if(b.startsWith('> '))return `<blockquote><p>${inline(b.replace(/^>\s?/gm,''))}</p></blockquote>`;if(/^[-*+]\s+/m.test(b))return `<ul>${b.split('\n').map(x=>`<li>${inline(x.replace(/^[-*+]\s+/,''))}</li>`).join('')}</ul>`;if(/^\d+[.)]\s+/m.test(b))return `<ol>${b.split('\n').map(x=>`<li>${inline(x.replace(/^\d+[.)]\s+/,''))}</li>`).join('')}</ol>`;if(b.startsWith('```'))return `<pre><code>${escapeHTML(b.replace(/^```[^\n]*\n?|```$/g,''))}</code></pre>`;return `<p>${inline(b.replace(/\n/g,' '))}</p>`;}).join('');
+  const isDivider = line => {const cells=splitRow(line);return cells.length>0&&cells.every(cell=>/^:?-{1,}:?$/.test(cell.replace(/\s/g,'')));};
+  const renderTable = rows => {
+    const heads=splitRow(rows[0]),aligns=splitRow(rows[1]).map(cell=>{const value=cell.replace(/\s/g,'');return value.startsWith(':')&&value.endsWith(':')?'center':value.endsWith(':')?'right':'left';});
+    const normalize=cells=>Array.from({length:heads.length},(_,i)=>cells[i]||'');
+    const body=rows.slice(2).map(row=>`<tr>${normalize(splitRow(row)).map((cell,i)=>`<td style="text-align:${aligns[i]||'left'}">${inline(cell.replace(/\\\|/g,'|'))}</td>`).join('')}</tr>`).join('');
+    return `<div class="markdown-table-wrap"><table><thead><tr>${heads.map((cell,i)=>`<th style="text-align:${aligns[i]||'left'}">${inline(cell.replace(/\\\|/g,'|'))}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+  };
+  const lines=md.replace(/\r/g,'').split('\n'),blocks=[];let paragraph=[];
+  const flush=()=>{if(paragraph.length){blocks.push({type:'block',value:paragraph.join('\n').trim()});paragraph=[];}};
+  for(let i=0;i<lines.length;){const line=lines[i];
+    if(line.trim().startsWith('```')){flush();const fence=line.trim().slice(3).trim();const code=[];i++;while(i<lines.length&&!lines[i].trim().startsWith('```'))code.push(lines[i++]);if(i<lines.length)i++;blocks.push({type:'code',value:code.join('\n'),language:fence});continue;}
+    if(i+1<lines.length&&line.includes('|')&&isDivider(lines[i+1])){flush();const rows=[line,lines[i+1]];i+=2;while(i<lines.length&&lines[i].includes('|')&&lines[i].trim()){rows.push(lines[i++]);}blocks.push({type:'table',rows});continue;}
+    if(!line.trim()){flush();i++;continue;}paragraph.push(line);i++;
+  }flush();
+  return blocks.map(item=>{if(item.type==='table')return renderTable(item.rows);if(item.type==='code')return `<pre><code${item.language?` class="language-${escapeHTML(item.language)}"`:''}>${escapeHTML(item.value)}</code></pre>`;const b=item.value;const h=b.match(/^(#{1,6})\s+([\s\S]+)$/);if(h){const n=Math.min(h[1].length+1,6);return `<h${n}>${inline(h[2])}</h${n}>`;}if(/^!\[.*\]\(.+\)$/.test(b))return `<figure>${inline(b)}</figure>`;if(b.startsWith('> '))return `<blockquote><p>${inline(b.replace(/^>\s?/gm,''))}</p></blockquote>`;if(/^[-*+]\s+/m.test(b))return `<ul>${b.split('\n').map(x=>`<li>${inline(x.replace(/^[-*+]\s+/,''))}</li>`).join('')}</ul>`;if(/^\d+[.)]\s+/m.test(b))return `<ol>${b.split('\n').map(x=>`<li>${inline(x.replace(/^\d+[.)]\s+/,''))}</li>`).join('')}</ol>`;return `<p>${inline(b.replace(/\n/g,' '))}</p>`;}).join('');
 }
 
 async function loadPortfolio() {
@@ -93,7 +106,8 @@ function renderCredentials(certifications, presentations) {
 }
 function credentialCard(item, certification) {
   const body = `<div class="credential-meta"><span>${escapeHTML(item.year || '')}</span><span>${escapeHTML(item.type || item.issuer || '')}</span></div><h3>${escapeHTML(item.title)}</h3><p>${escapeHTML(item.description || '')}</p>${certification && item.credentialId ? `<small>Credential: ${escapeHTML(item.credentialId)}</small>` : ''}`;
-  return item.url ? `<a class="credential-card" href="${safeURL(item.url)}" target="_blank" rel="noreferrer">${body}<span class="card-arrow">View ↗</span></a>` : `<article class="credential-card">${body}</article>`;
+  const href=certification?`certificate.html?id=${encodeURIComponent(item.credentialId||item.title)}`:safeURL(item.url);
+  return item.url ? `<a class="credential-card" href="${href}"${certification?'':' target="_blank" rel="noreferrer"'}>${body}<span class="card-arrow">${certification?'View certificate':'View'} ↗</span></a>` : `<article class="credential-card">${body}</article>`;
 }
 function postCard(post) {
   return `<a class="post-card" href="post.html?slug=${encodeURIComponent(post.slug)}"><div class="post-meta"><span>${escapeHTML(post.category)}</span><span>${formatDate(post.date)}</span></div><h3>${escapeHTML(post.title)}</h3><p>${escapeHTML(post.excerpt)}</p><div class="post-footer"><span>${escapeHTML(post.readTime)}</span><span>Read article ↗</span></div></a>`;
@@ -133,6 +147,7 @@ async function loadArticle() {
     $('#article').innerHTML = `<header class="article-header"><div class="post-meta"><span>${escapeHTML(post.category)}</span><span>${formatDate(post.date)} · ${escapeHTML(post.readTime)}</span></div><h1>${escapeHTML(post.title)}</h1><p>${escapeHTML(post.excerpt)}</p><div class="tags">${post.tags.map(t => `<span>${escapeHTML(t)}</span>`).join('')}</div></header><div class="article-body">${content}</div>`;
   } catch (error) { console.error(error); }
 }
+async function loadCertificate(){if(!$('#certificate-view'))return;try{const certificates=await getJSON('data/certifications.json'),id=new URLSearchParams(location.search).get('id'),certificate=certificates.find(item=>(item.credentialId||item.title)===id)||certificates[0];if(!certificate||!certificate.url)throw new Error('Certificate not found');document.title=`${certificate.title} — Sazad Ahemad`;$('#certificate-view').innerHTML=`<header class="certificate-header"><span class="eyebrow">Verified certificate</span><h1>${escapeHTML(certificate.title)}</h1><p>${escapeHTML(certificate.issuer||'')}</p></header><div class="pdf-notice">View-only presentation. Download controls are hidden; public web files cannot be made impossible to save.</div><div class="pdf-frame-wrap" oncontextmenu="return false"><iframe title="${escapeHTML(certificate.title)}" src="${safeURL(certificate.url)}#toolbar=0&navpanes=0&scrollbar=1&view=FitH" loading="eager"></iframe></div>`;}catch(error){console.error(error);$('#certificate-view').innerHTML='<div class="load-error-inline">This certificate could not be loaded.</div>';}}
 
 async function loadProject() {
   if (!$('#project-viewer')) return;
@@ -159,16 +174,17 @@ async function renderRepository(repo, originalURL) {
     const context=repo.provider==='github'
       ? {browseBase:`https://github.com/${repo.owner}/${repo.name}/blob/${encodeURIComponent(branch)}`,rawBase:`https://raw.githubusercontent.com/${repo.owner}/${repo.name}/${encodeURIComponent(branch)}`}
       : {browseBase:`https://gitlab.com/${repo.path}/-/blob/${encodeURIComponent(branch)}`,rawBase:`https://gitlab.com/${repo.path}/-/raw/${encodeURIComponent(branch)}`};
-    target.innerHTML=`<div class="repo-summary"><div><span>Repository</span><strong>${escapeHTML(repo.provider==='github'?`${repo.owner}/${repo.name}`:repo.path)}</strong></div><div><span>Stars</span><strong>${stars}</strong></div><div><span>Forks</span><strong>${forks}</strong></div></div><p class="repo-description">${escapeHTML(description)}</p><div class="repo-browser"><div class="repo-browser-head"><strong id="repo-path">Files /</strong><a href="${safeURL(originalURL)}" target="_blank" rel="noreferrer">Browse on ${escapeHTML(repo.provider)} ↗</a></div><div id="repo-files"></div></div>${readme?`<section class="repo-readme"><div class="repo-browser-head"><strong>README.md</strong></div><div class="article-body">${renderMarkdown(readme,context)}</div></section>`:''}`;
+    target.innerHTML=`<div class="repo-summary"><div><span>Repository</span><strong>${escapeHTML(repo.provider==='github'?`${repo.owner}/${repo.name}`:repo.path)}</strong></div><div><span>Stars</span><strong>${stars}</strong></div><div><span>Forks</span><strong>${forks}</strong></div></div><p class="repo-description">${escapeHTML(description)}</p><div class="repo-browser"><div class="repo-browser-head"><strong id="repo-path">Files /</strong><a href="${safeURL(originalURL)}" target="_blank" rel="noreferrer">Browse on ${escapeHTML(repo.provider)} ↗</a></div><div id="repo-files"></div></div><section id="repo-file-viewer" class="repo-file-viewer" hidden></section>${readme?`<section class="repo-readme"><div class="repo-browser-head"><strong>README.md</strong></div><div class="article-body">${renderMarkdown(readme,context)}</div></section>`:''}`;
+    const viewFile=async(path,name)=>{const viewer=$('#repo-file-viewer');viewer.hidden=false;viewer.innerHTML='<div class="repo-loading">Loading file…</div>';viewer.scrollIntoView({behavior:'smooth',block:'start'});const encoded=path.split('/').map(encodeURIComponent).join('/');const rawURL=`${context.rawBase}/${encoded}`;const response=await fetch(rawURL,{cache:'no-store'});if(!response.ok)throw new Error(`File HTTP ${response.status}`);const ext=(name.split('.').pop()||'').toLowerCase(),imageTypes=['png','jpg','jpeg','gif','webp','svg','bmp','ico'];let content='';if(imageTypes.includes(ext)){content=`<div class="repo-image-preview"><img src="${escapeHTML(rawURL)}" alt="${escapeHTML(name)}"></div>`;}else if(['md','markdown'].includes(ext)){const fileContext={...context,currentDir:path.includes('/')?path.slice(0,path.lastIndexOf('/')):''};content=`<div class="article-body">${renderMarkdown(await response.text(),fileContext)}</div>`;}else if(['pdf','zip','gz','tar','7z','rar','exe','bin','ppt','pptx','doc','docx','xls','xlsx'].includes(ext)){content='<div class="repo-fallback"><p>This binary file cannot be rendered safely in the source viewer.</p></div>';}else{content=`<pre class="repo-code"><code>${escapeHTML(await response.text())}</code></pre>`;}viewer.innerHTML=`<div class="repo-browser-head"><strong>${escapeHTML(path)}</strong><button type="button" class="repo-close-file">Close ×</button></div>${content}`;};
     const loadDirectory=async(path='')=>{
       const list=$('#repo-files'),label=$('#repo-path');list.innerHTML='<div class="repo-loading">Loading folder…</div>';
       const encodedPath=path.split('/').filter(Boolean).map(encodeURIComponent).join('/');
       const files=repo.provider==='github'?await fetchRemoteJSON(`https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`):await fetchRemoteJSON(`https://gitlab.com/api/v4/projects/${encodeURIComponent(repo.path)}/repository/tree?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(branch)}&per_page=100`);
       label.textContent=`Files /${path?` ${path}`:''}`;const parent=path.includes('/')?path.slice(0,path.lastIndexOf('/')):'';
       const up=path?`<button class="repo-file repo-folder" type="button" data-repo-path="${escapeHTML(parent)}"><span>←</span><span>..</span></button>`:'';
-      list.innerHTML=up+files.slice(0,100).map(file=>{const directory=file.type==='dir'||file.type==='tree',filePath=file.path||file.name,href=`${context.browseBase}/${filePath.split('/').map(encodeURIComponent).join('/')}`;return directory?`<button class="repo-file repo-folder" type="button" data-repo-path="${escapeHTML(filePath)}"><span>□</span><span>${escapeHTML(file.name)}</span></button>`:`<a class="repo-file" href="${escapeHTML(href)}" target="_blank" rel="noreferrer"><span>—</span><span>${escapeHTML(file.name)}</span></a>`;}).join('');
+      list.innerHTML=up+files.slice(0,100).map(file=>{const directory=file.type==='dir'||file.type==='tree',filePath=file.path||file.name;return directory?`<button class="repo-file repo-folder" type="button" data-repo-path="${escapeHTML(filePath)}"><span>□</span><span>${escapeHTML(file.name)}</span></button>`:`<button class="repo-file repo-view-file" type="button" data-repo-file="${escapeHTML(filePath)}" data-repo-name="${escapeHTML(file.name)}"><span>—</span><span>${escapeHTML(file.name)}</span></button>`;}).join('');
     };
-    target.addEventListener('click',event=>{const folder=event.target.closest('[data-repo-path]');if(!folder)return;loadDirectory(folder.dataset.repoPath).catch(error=>{console.error(error);$('#repo-files').innerHTML='<div class="repo-fallback">This folder could not be loaded. The repository API may be rate-limited.</div>';});});
+    target.addEventListener('click',event=>{const folder=event.target.closest('[data-repo-path]');if(folder){loadDirectory(folder.dataset.repoPath).catch(error=>{console.error(error);$('#repo-files').innerHTML='<div class="repo-fallback">This folder could not be loaded. The repository API may be rate-limited.</div>';});return;}const file=event.target.closest('[data-repo-file]');if(file){viewFile(file.dataset.repoFile,file.dataset.repoName).catch(error=>{console.error(error);$('#repo-file-viewer').innerHTML='<div class="repo-fallback">This file could not be loaded. It may be too large, private, or temporarily rate-limited.</div>';});return;}if(event.target.closest('.repo-close-file')){$('#repo-file-viewer').hidden=true;}});
     await loadDirectory();
   } catch(error) { console.error(error); target.innerHTML=`<div class="repo-fallback"><h2>Repository preview unavailable</h2><p>The repository may be private, moved, rate-limited, or blocking API access. You can still open the original repository.</p><a class="repo-external-link" href="${safeURL(originalURL)}" target="_blank" rel="noreferrer">Open repository ↗</a></div>`; }
 }
@@ -203,3 +219,4 @@ loadPortfolio();
 loadBlog();
 loadArticle();
 loadProject();
+loadCertificate();
