@@ -127,4 +127,4 @@ The final result was not just a Prometheus and Grafana installation. It was an i
 
 The complete presentation covers the architecture, Terraform infrastructure, Ansible automation, monitoring stack, CI/CD workflow, challenges and future improvements.
 
-**[View the Prometheus + Grafana Infrastructure Setup Presentation](../assets/presentations/Prometheus-Grafana-Infra-Setup-using-Terraform.pptx)**
+**[View the Prometheus + Grafana Infrastructure Setup Presentation](https://connect2sazad.github.io/presentation.html?id=Prometheus%20%2B%20Grafana%20Infrastructure%20Setup%20using%20Terraform)**
