@@ -14,6 +14,23 @@ I build, automate and operate reliable infrastructure—from Linux servers and A
 
 Visit my portfolio at **[connect2sazad.github.io](https://connect2sazad.github.io)** for my complete experience, skills, projects, certifications, presentations and technical articles.
 
+## Adding a PDF Presentation
+
+1. Upload the PDF to `assets/presentations/`.
+2. Add or update its entry in `data/presentations.json`.
+3. Set `pdfUrl` to the PDF path. The presentation card will open it in the full-screen **Presentation Viewer**.
+
+```json
+{
+  "id": "unique-presentation-id",
+  "title": "Presentation title",
+  "type": "Technical Presentation",
+  "year": "2026",
+  "description": "Short presentation description.",
+  "pdfUrl": "assets/presentations/presentation-file.pdf"
+}
+```
+
 ## Technical Skills
 
 | Area | Technologies |

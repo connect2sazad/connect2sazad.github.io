@@ -112,8 +112,8 @@ function renderCredentials(certifications, presentations) {
 }
 function credentialCard(item, certification) {
   const body = `<div class="credential-meta"><span>${escapeHTML(item.year || '')}</span><span>${escapeHTML(item.type || item.issuer || '')}</span></div><h3>${escapeHTML(item.title)}</h3><p>${escapeHTML(item.description || '')}</p>${certification && item.credentialId ? `<small>Credential: ${escapeHTML(item.credentialId)}</small>` : ''}`;
-  const href=certification?`certificate.html?id=${encodeURIComponent(item.credentialId||item.title)}`:safeURL(item.url);
-  return item.url ? `<a class="credential-card" href="${href}"${certification?'':' target="_blank" rel="noreferrer"'}>${body}<span class="card-arrow">${certification?'View certificate':'View'} ↗</span></a>` : `<article class="credential-card">${body}</article>`;
+  const href=certification?`certificate.html?id=${encodeURIComponent(item.credentialId||item.title)}`:`presentation.html?id=${encodeURIComponent(item.id||item.title)}`;
+  return item.url ? `<a class="credential-card" href="${href}">${body}<span class="card-arrow">${certification?'View certificate':'Presentation viewer'} ↗</span></a>` : `<article class="credential-card">${body}</article>`;
 }
 function postCard(post) {
   return `<a class="post-card" href="post.html?slug=${encodeURIComponent(post.slug)}"><div class="post-meta"><span>${escapeHTML(post.category)}</span><span>${formatDate(post.date)}</span></div><h3>${escapeHTML(post.title)}</h3><p>${escapeHTML(post.excerpt)}</p><div class="post-footer"><span>${escapeHTML(post.readTime)}</span><span>Read article ↗</span></div></a>`;
@@ -154,6 +154,25 @@ async function loadArticle() {
   } catch (error) { console.error(error); }
 }
 async function loadCertificate(){if(!$('#certificate-view'))return;try{const certificates=await getJSON('data/certifications.json'),id=new URLSearchParams(location.search).get('id'),certificate=certificates.find(item=>(item.credentialId||item.title)===id)||certificates[0];if(!certificate||!certificate.url)throw new Error('Certificate not found');document.title=`${certificate.title} — Sazad Ahemad`;$('#certificate-view').innerHTML=`<header class="certificate-header"><span class="eyebrow">Verified certificate</span><h1>${escapeHTML(certificate.title)}</h1><p>${escapeHTML(certificate.issuer||'')}</p></header><div class="pdf-notice">View-only presentation. Download controls are hidden; public web files cannot be made impossible to save.</div><div class="pdf-frame-wrap" oncontextmenu="return false"><iframe title="${escapeHTML(certificate.title)}" src="${safeURL(certificate.url)}#toolbar=0&navpanes=0&scrollbar=1&view=FitH" loading="eager"></iframe></div>`;}catch(error){console.error(error);$('#certificate-view').innerHTML='<div class="load-error-inline">This certificate could not be loaded.</div>';}}
+
+async function loadPresentation(){
+  if(!$('#presentation-view'))return;
+  try{
+    const presentations=await getJSON('data/presentations.json');
+    const id=new URLSearchParams(location.search).get('id');
+    const presentation=presentations.find(item=>(item.id||item.title)===id)||presentations[0];
+    const pdfURL=presentation?.pdfUrl||(/\.pdf(?:[?#].*)?$/i.test(presentation?.url||'')?presentation.url:'');
+    if(!presentation||!pdfURL)throw new Error('Presentation PDF not configured');
+    document.title=`${presentation.title} — Presentation Viewer`;
+    $('#presentation-title').textContent=presentation.title;
+    const frame=$('#presentation-frame');
+    frame.title=`${presentation.title} — Presentation Viewer`;
+    frame.src=`${safeURL(pdfURL)}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`;
+  }catch(error){
+    console.error(error);
+    $('#presentation-stage').innerHTML='<div class="presentation-error"><strong>Presentation PDF unavailable.</strong><p>Upload the PDF file and set its path as <code>pdfUrl</code> in <code>data/presentations.json</code>.</p></div>';
+  }
+}
 
 async function loadProject() {
   if (!$('#project-viewer')) return;
@@ -226,3 +245,4 @@ loadBlog();
 loadArticle();
 loadProject();
 loadCertificate();
+loadPresentation();

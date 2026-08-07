@@ -1,0 +1,417 @@
+---
+slug: terraform-vs-ansible-practical-boundary
+title: Terraform vs Ansible: A Practical Boundary That Prevents Confusion
+excerpt: Terraform and Ansible overlap in capability, but they should not compete for ownership. The practical boundary I use is simple: Terraform owns infrastructure, while Ansible owns server configuration.
+date: 2026-08-07
+readTime: 8 min read
+category: DevOps
+tags: [Terraform, Ansible, Infrastructure as Code, Configuration Management, DevOps, AWS]
+---
+
+When I started using Terraform and Ansible together, one question kept appearing:
+
+**Where should Terraform stop and Ansible begin?**
+
+Both tools can perform tasks outside their primary purpose. Terraform can execute commands on a newly created server, while Ansible can interact with cloud providers and create infrastructure.
+
+That overlap can create unnecessary confusion.
+
+The boundary I now use is simple:
+
+> **Terraform creates and owns infrastructure. Ansible configures what runs inside that infrastructure.**
+
+![Terraform and Ansible practical boundary](../assets/blog-posts/terraform-ansible-practical-boundary.png)
+
+# The problem is not capability — it is ownership
+
+Asking whether Terraform or Ansible *can* perform a task is usually the wrong question.
+
+A better question is:
+
+**Which tool should be the source of truth for this resource or configuration?**
+
+If two automation systems both modify the same layer, troubleshooting becomes harder and configuration drift becomes easier to create.
+
+Clear ownership makes the repository, pipeline and debugging process easier to understand.
+
+# What I use Terraform for
+
+Terraform owns resources that define the infrastructure itself.
+
+Examples include:
+
+```text
+VPC
+Subnets
+Route tables
+Internet gateways
+Security groups
+EC2 instances
+Load balancers
+Target groups
+RDS databases
+S3 buckets
+IAM resources
+DNS infrastructure
+```
+
+A Terraform resource describes infrastructure that Terraform can track through its state.
+
+```hcl
+resource "aws_instance" "web_server" {
+  ami           = var.ami_id
+  instance_type = var.instance_type
+
+  tags = {
+    Name = "web-server"
+    Role = "web"
+  }
+}
+```
+
+If the desired infrastructure changes, `terraform plan` shows what Terraform intends to create, modify or destroy.
+
+That lifecycle and state management is exactly what I want Terraform to own.
+
+# What I use Ansible for
+
+After the server exists, I normally hand responsibility to Ansible.
+
+Ansible owns operating-system and application configuration.
+
+Typical tasks include:
+
+```text
+Installing packages
+Creating users and groups
+Managing directories
+Setting ownership and permissions
+Deploying configuration files
+Configuring Nginx or Apache
+Configuring PHP-FPM
+Installing Docker
+Deploying Docker Compose stacks
+Starting and enabling services
+Deploying monitoring exporters
+Configuring applications
+```
+
+For example:
+
+```yaml
+- name: Configure web server
+  hosts: role_web
+  become: true
+
+  tasks:
+    - name: Ensure nginx is installed
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: true
+
+    - name: Ensure nginx is running
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+```
+
+Terraform created the machine.
+
+Ansible turned that machine into the server I actually needed.
+
+# The workflow
+
+![Terraform and Ansible workflow](../assets/blog-posts/terraform-ansible-workflow.png)
+
+The clean workflow I prefer is:
+
+```text
+Terraform
+   ↓
+Provision infrastructure
+   ↓
+Infrastructure becomes reachable
+   ↓
+Ansible discovers hosts
+   ↓
+Configure operating system
+   ↓
+Deploy applications and services
+   ↓
+Validate the final state
+```
+
+This gives both tools a clear boundary while still allowing them to participate in one automated deployment.
+
+# Why I avoid using Terraform as a configuration-management tool
+
+Terraform supports provisioners such as `remote-exec`.
+
+For example:
+
+```hcl
+provisioner "remote-exec" {
+  inline = [
+    "sudo apt update",
+    "sudo apt install -y nginx",
+    "sudo systemctl enable nginx",
+    "sudo systemctl start nginx"
+  ]
+}
+```
+
+This may work for a small bootstrap operation.
+
+But I do not want a real server configuration to become hundreds of shell commands embedded in Terraform.
+
+Once I need reusable roles, templates, handlers, permissions, service management, conditional tasks or configuration validation, Ansible provides a much cleaner model.
+
+Terraform should not become my replacement for a configuration-management system simply because it can execute shell commands.
+
+# Why I normally do not let Ansible own Terraform-style infrastructure
+
+Ansible can interact with AWS and other cloud providers.
+
+That does not mean I want it to own my complete cloud-resource lifecycle.
+
+For infrastructure, I value Terraform's state and planning model.
+
+Before changing production infrastructure I can run:
+
+```bash
+terraform plan
+```
+
+and review the proposed changes.
+
+That is a useful boundary: Terraform understands infrastructure state; Ansible understands how I want the hosts configured.
+
+# My decision rule
+
+When I am unsure, I ask one question:
+
+**Am I changing the infrastructure itself, or something inside the infrastructure?**
+
+![Terraform vs Ansible decision guide](../assets/blog-posts/terraform-ansible-decision-guide.png)
+
+If I am changing:
+
+```text
+VPC
+EC2
+Security Group
+Load Balancer
+RDS
+S3
+IAM
+DNS
+```
+
+I normally use **Terraform**.
+
+If I am changing:
+
+```text
+Linux packages
+Users and groups
+File permissions
+Nginx
+Apache
+PHP-FPM
+Docker
+Application files
+systemd services
+Prometheus configuration
+Monitoring exporters
+```
+
+I normally use **Ansible**.
+
+# Example from my monitoring-platform project
+
+This boundary became especially useful while building my infrastructure monitoring platform.
+
+Terraform owned the AWS layer:
+
+```text
+Terraform
+├── VPC
+├── Subnets
+├── Internet Gateway
+├── Route Tables
+├── Security Groups
+└── EC2 Instances
+```
+
+Ansible owned the configuration layer:
+
+```text
+Ansible
+├── Server preparation
+├── Docker configuration
+├── Node Exporter
+├── Apache Exporter
+├── cAdvisor
+├── Prometheus configuration
+├── Alertmanager configuration
+└── Grafana provisioning
+```
+
+GitLab CI/CD coordinated the workflow.
+
+This also created clean debugging boundaries.
+
+If the EC2 instance did not exist, I looked at Terraform.
+
+If the instance existed but Ansible could not reach it, I checked inventory, networking and SSH.
+
+If Ansible connected successfully but a monitoring service failed, I investigated the configuration or application layer.
+
+Clear ownership makes failures easier to isolate.
+
+# Dynamic inventory creates the handoff
+
+Keeping Terraform and Ansible separate does not mean manually copying Terraform outputs into Ansible.
+
+A cleaner approach is dynamic inventory.
+
+Terraform can create EC2 instances with useful tags:
+
+```text
+Role = web
+Environment = production
+```
+
+Ansible can discover those machines through AWS and group them according to those tags.
+
+Conceptually:
+
+```text
+Terraform
+   │
+   ├── creates EC2
+   └── assigns tags
+          ↓
+        AWS
+          ↓
+Ansible dynamic inventory
+          ↓
+      role_web
+```
+
+Terraform still owns the instance.
+
+Ansible simply discovers the infrastructure it needs to configure.
+
+# Idempotency matters on both sides
+
+Both tools work best when I describe desired state instead of writing one-time command sequences.
+
+For Ansible, I prefer:
+
+```yaml
+- name: Ensure nginx is installed
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+```
+
+instead of:
+
+```yaml
+- shell: apt install nginx -y
+```
+
+The first task clearly describes the desired state.
+
+Terraform follows the same general principle at the infrastructure layer: I describe what resources should exist rather than writing a script that manually creates them.
+
+# CI/CD connects the layers
+
+A CI/CD pipeline can coordinate Terraform and Ansible without blurring their responsibilities.
+
+For example:
+
+```text
+terraform_init
+      ↓
+terraform_validate
+      ↓
+terraform_plan
+      ↓
+terraform_apply
+      ↓
+test_inventory
+      ↓
+ansible_configure
+      ↓
+deployment_validation
+```
+
+Each failure now has a useful boundary.
+
+A Terraform failure points toward infrastructure.
+
+An inventory failure points toward discovery, networking or authentication.
+
+An Ansible failure points toward configuration.
+
+A health-check failure points toward the deployed service.
+
+That structure is much easier to debug than a single deployment script doing everything.
+
+# What happens when both tools own the same layer
+
+The real danger is not using both tools.
+
+The danger is giving both tools authority over the same thing.
+
+Imagine Terraform creates an EC2 instance and then uses `remote-exec` to install Docker, configure Nginx, create directories and start applications.
+
+Later, Ansible also starts managing Docker, Nginx and those directories.
+
+Now I have two sources of truth.
+
+When something changes unexpectedly, which automation system should correct it?
+
+That ambiguity is exactly what I try to avoid.
+
+# Exceptions are fine when ownership remains clear
+
+This boundary is a design rule, not a law.
+
+There are legitimate cases where Terraform performs a small bootstrap action or Ansible interacts with cloud resources.
+
+The important distinction is between **integration** and **shared ownership**.
+
+I am comfortable with one tool helping another.
+
+I try to avoid:
+
+```text
+Terraform owns X
+      +
+Ansible also owns X
+```
+
+because that makes the desired state ambiguous.
+
+# Final thought
+
+I do not think of Terraform and Ansible as competing tools.
+
+I think of them as automation at two different layers.
+
+**Terraform answers:** What infrastructure should exist?
+
+**Ansible answers:** How should those machines be configured?
+
+And CI/CD answers: How should those two stages run consistently?
+
+The useful boundary is therefore simple:
+
+> **Terraform creates the environment. Ansible turns that environment into the system I want to run.**
+
+Once I started treating ownership this way, combining Terraform and Ansible became much less confusing.
