@@ -10,31 +10,17 @@ function safeURL(value = '') {
   const url = String(value).trim();
   return /^(https?:|mailto:|tel:)/i.test(url) || /^(?:\.\/)?assets\/[\w./%+() -]+$/i.test(url) ? url : '#';
 }
-async function getEmbeddedData(key) {
-  if (key === 'posts') return STATIC_CONTENT.postNames;
-  if (Object.prototype.hasOwnProperty.call(STATIC_CONTENT.data, key)) return STATIC_CONTENT.data[key];
-  throw new Error(`Missing embedded content: ${key}`);
+async function getJSON(path) {
+  const response = await fetch(`${path}?updated=${Date.now()}`, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
 }
-async function getEmbeddedPost(name) {
-  if (Object.prototype.hasOwnProperty.call(STATIC_CONTENT.posts, name)) return STATIC_CONTENT.posts[name];
-  throw new Error(`Missing embedded post: ${name}`);
-}
+async function getText(path) { const r = await fetch(`${path}?updated=${Date.now()}`, {cache:'no-store'}); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); }
 function parsePost(source) {
   const parts = source.replace(/^\uFEFF/, '').match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/); if (!parts) throw new Error('Post front matter missing');
   const post = {tags:[], markdown:parts[2].trim()}; parts[1].split(/\r?\n/).forEach(line => { const i=line.indexOf(':'); if(i<0)return; const k=line.slice(0,i).trim(),v=line.slice(i+1).trim().replace(/^['"]|['"]$/g,''); post[k]=k==='tags'?v.replace(/^\[|\]$/g,'').split(',').map(x=>x.trim()).filter(Boolean):v; }); return post;
 }
-async function loadPosts() {
-  const names = await getEmbeddedData('posts');
-  if (!Array.isArray(names)) throw new Error('Embedded post index is invalid');
-  const results = await Promise.allSettled(names.map(async name => {
-    if (!/^[\w.-]+\.md$/.test(name)) throw new Error(`Invalid post filename: ${name}`);
-    const post = parsePost(await getEmbeddedPost(name));
-    post.slug = post.slug || name.replace(/\.md$/, '');
-    return post;
-  }));
-  results.filter(result => result.status === 'rejected').forEach(result => console.error('Skipping unavailable blog post:', result.reason));
-  return results.filter(result => result.status === 'fulfilled').map(result => result.value).sort((a, b) => String(b.date).localeCompare(String(a.date)));
-}
+async function loadPosts() { const names=await getJSON('data/posts/index.json'); if(!Array.isArray(names))throw new Error('Post index must be a JSON array'); const posts=await Promise.all(names.map(async name=>{if(!/^[\w.-]+\.md$/.test(name))throw new Error('Invalid post filename');const p=parsePost(await getText(`data/posts/${name}`));p.slug=p.slug||name.replace(/\.md$/,'');return p;})); return posts.sort((a,b)=>String(b.date).localeCompare(String(a.date))); }
 function resolveMarkdownURL(value = '', context = null, image = false) {
   const url = String(value).trim().replace(/^<|>$/g, '');
   if (/^(https?:|mailto:|tel:|data:image\/)/i.test(url) || url.startsWith('#')) return url;
@@ -60,16 +46,13 @@ async function loadPortfolio() {
   if (!$('#hero-name')) return;
   try {
     const keys = ['site','about','focus','skills','experience','projects','certifications','presentations','education','contact'];
-    const values = await Promise.all(keys.map(key => getEmbeddedData(key)));
+    const values = await Promise.all(keys.map(key => getJSON(`data/${key}.json`)));
     const data = Object.fromEntries(keys.map((key, index) => [key, values[index]]));
     const posts = await loadPosts();
     renderPortfolio(data, posts);
   } catch (error) {
     console.error(error);
-    const message = location.protocol === 'file:'
-      ? 'Embedded website content could not be loaded.'
-      : 'Embedded website content could not be loaded.';
-    document.body.insertAdjacentHTML('afterbegin', `<div class="load-error">${message}</div>`);
+    document.body.insertAdjacentHTML('afterbegin', '<div class="load-error">Content could not be loaded. Run a local web server instead of opening the HTML file directly.</div>');
   }
 }
 function renderPortfolio(data, posts) {
@@ -97,7 +80,7 @@ function renderPortfolio(data, posts) {
 function renderCredentials(certifications, presentations) {
   $('#certification-count').textContent = String(certifications.length).padStart(2, '0');
   $('#presentation-count').textContent = String(presentations.length).padStart(2, '0');
-  $('#certifications-list').innerHTML = certifications.length ? certifications.map(c => credentialCard(c, true)).join('') : '<div class="empty-card"><strong>Details coming soon.</strong><p>No verified certifications have been published.</p></div>';
+  $('#certifications-list').innerHTML = certifications.length ? certifications.map(c => credentialCard(c, true)).join('') : '<div class="empty-card"><strong>Details coming soon.</strong><p>Add verified certifications in <code>data/certifications.json</code>. Nothing unverified has been published.</p></div>';
   $('#presentations-list').innerHTML = presentations.length ? presentations.map(p => credentialCard(p, false)).join('') : '<div class="empty-card"><strong>No presentations published yet.</strong></div>';
 }
 function credentialCard(item, certification) {
@@ -146,14 +129,14 @@ async function loadArticle() {
 async function loadProject() {
   if (!$('#project-viewer')) return;
   try {
-    const projects = await getEmbeddedData('projects');
+    const projects = await getJSON('data/projects.json');
     const id = Number(new URLSearchParams(location.search).get('id'));
     const project = projects[Number.isInteger(id) && projects[id] ? id : 0];
     document.title = `${project.title} — Sazad Ahemad`;
     const repo = parseRepository(project.url);
     $('#project-viewer').innerHTML = `<header class="project-detail-header"><div class="post-meta"><span>${escapeHTML(project.platform)}</span><span>Embedded repository</span></div><h1>${escapeHTML(project.title)}</h1><p>${escapeHTML(project.description)}</p><div class="tags">${project.tags.map(t=>`<span>${escapeHTML(t)}</span>`).join('')}</div><a class="repo-external-link" href="${safeURL(project.url)}" target="_blank" rel="noreferrer">Open original repository ↗</a></header><section id="repo-embed" class="repo-embed"><div class="repo-loading">Loading repository details…</div></section>`;
     await renderRepository(repo, project.url);
-  } catch (error) { console.error(error); $('#project-viewer').innerHTML = '<div class="load-error-inline">The project could not be loaded. Check the embedded project record and repository URL.</div>'; }
+  } catch (error) { console.error(error); $('#project-viewer').innerHTML = '<div class="load-error-inline">The project could not be loaded. Check the project JSON and repository URL.</div>'; }
 }
 function parseRepository(url) { const parsed=new URL(url); const parts=parsed.pathname.replace(/^\/+|\/+$/g,'').split('/'); if(parsed.hostname==='github.com'&&parts.length>=2)return{provider:'github',owner:parts[0],name:parts[1]}; if(parsed.hostname==='gitlab.com'&&parts.length>=2)return{provider:'gitlab',path:parts.join('/')}; throw new Error('Unsupported repository URL'); }
 async function fetchRemoteJSON(url) { const response=await fetch(url,{cache:'no-store'}); if(!response.ok)throw new Error(`Repository API HTTP ${response.status}`); return response.json(); }
