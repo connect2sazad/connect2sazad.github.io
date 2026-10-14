@@ -1,0 +1,542 @@
+---
+slug: how-to-create-ec2-instance-on-aws
+title: How to Create an EC2 Instance on AWS: A Practical Step-by-Step Guide
+excerpt: Learn how to launch an Amazon EC2 instance, configure networking and security groups, connect through SSH, and verify your Linux server.
+date: 2026-10-14
+readTime: 8 min read
+category: AWS
+tags: [AWS, EC2, Cloud Computing, Linux, SSH, DevOps]
+---
+
+# How to Create an EC2 Instance on AWS
+
+Amazon Elastic Compute Cloud (EC2) is one of the core services I use when working with AWS infrastructure. It allows me to launch virtual servers in the cloud, configure their networking and security, and run applications without managing physical hardware.
+
+In this guide, I will walk through the process of creating an EC2 instance from the AWS Management Console, connecting to it through SSH, and verifying that the server is working correctly.
+
+The goal is not just to launch a virtual machine. It is to understand the important decisions involved in creating a usable and reasonably secure cloud server.
+
+![AWS EC2 instance creation workflow](../assets/blog-posts/aws-ec2-instance-creation-workflow.png)
+
+# What is Amazon EC2?
+
+Amazon EC2 is an AWS service that provides resizable virtual computing capacity in the cloud.
+
+An EC2 instance can be used for:
+
+- Hosting websites and web applications
+- Running backend APIs and application services
+- Performing development and testing
+- Running monitoring tools such as Prometheus and Grafana
+- Hosting self-managed workloads
+- Learning Linux administration and cloud infrastructure
+
+Before launching an instance, I need to understand a few basic components.
+
+| Component | Purpose |
+|---|---|
+| AMI | The operating system image used to launch the instance |
+| Instance type | Defines the available CPU, memory, and other computing resources |
+| Key pair | Provides an authentication method for SSH access |
+| VPC | Provides the network in which the instance runs |
+| Subnet | Places the instance within a particular network segment |
+| Security group | Controls inbound and outbound network traffic |
+| EBS volume | Provides persistent block storage for the instance |
+| Public IP | Allows internet communication when networking and routing permit it |
+
+Understanding these components makes the launch process easier to troubleshoot later.
+
+# Step 1: Sign in to the AWS Management Console
+
+First, I sign in to the AWS Management Console using my AWS account.
+
+I navigate to the EC2 service and select the AWS Region in which I want to deploy the server.
+
+For example, I might choose the Mumbai Region if it is appropriate for my application's latency, service availability, and cost requirements.
+
+AWS Regions are independent geographical areas, and not every resource or instance type is available in every Region.
+
+Before proceeding, I also check that I am using the intended AWS account and Region.
+
+# Step 2: Open the EC2 launch wizard
+
+From the EC2 dashboard, I select **Launch instance**.
+
+AWS opens a configuration page where I can define the instance name, operating system, hardware specifications, authentication method, networking, storage, and other settings.
+
+I prefer to configure these options deliberately rather than accepting every default without reviewing it.
+
+# Step 3: Enter an instance name
+
+Under the instance name field, I enter a meaningful name.
+
+For example:
+
+```text
+web-server-dev
+```
+
+A clear naming convention becomes useful when an AWS account contains multiple instances.
+
+In a larger environment, names can include the application, environment, or role.
+
+Examples:
+
+```text
+api-server-dev
+web-server-staging
+monitoring-server-prod
+```
+
+I can also use tags to organize resources and identify their purpose.
+
+For production infrastructure, consistent tags can help with cost allocation, automation, inventory discovery, and operational management.
+
+# Step 4: Select an Amazon Machine Image
+
+An Amazon Machine Image (AMI) provides the operating system and initial software configuration used to launch an EC2 instance.
+
+AWS offers multiple AMIs, including Amazon Linux and Ubuntu images.
+
+For this practical example, I select a suitable Ubuntu Server LTS AMI.
+
+The exact image version and availability may change over time, so I review the current options in the console.
+
+The choice depends on the workload:
+
+- Ubuntu Server for many Linux administration and application-hosting tasks
+- Amazon Linux for workloads that benefit from AWS-oriented integration and tooling
+- Other supported Linux distributions or Windows Server when the application requires them
+
+For a general-purpose Linux learning environment, Ubuntu Server LTS is a reasonable starting point.
+
+# Step 5: Choose an instance type
+
+The instance type determines the computing resources allocated to the virtual server.
+
+For example, the available options may include general-purpose instance families such as `t3` or `t4g`.
+
+A small instance may be sufficient for learning Linux administration or testing a basic web server, but the right choice depends on CPU architecture, memory requirements, workload, and regional availability.
+
+I check the following before choosing:
+
+- Number of vCPUs
+- Available memory
+- CPU architecture
+- Expected workload
+- Pricing and eligibility for any applicable free-tier or promotional offers
+
+For this tutorial, I select a small, suitable instance type available in my chosen Region.
+
+I do not assume that a particular instance is free simply because it is small. I review the current AWS pricing and account eligibility before launching it.
+
+## Common AWS EC2 Instance Types Compared
+
+AWS provides different EC2 instance families for different workloads. For learning, testing, and small applications, burstable T-series instances are a common starting point.
+
+The following table compares commonly used T2, T3, and T4g instance types.
+
+| Instance Type | vCPU | RAM | CPU Architecture | Typical Use Case |
+|---|---:|---:|---|---|
+| `t2.micro` | 1 | 1 GiB | x86_64 | Basic testing and learning |
+| `t2.small` | 1 | 2 GiB | x86_64 | Lightweight applications |
+| `t2.medium` | 2 | 4 GiB | x86_64 | Small web servers |
+| `t2.large` | 2 | 8 GiB | x86_64 | Small application workloads |
+| `t2.xlarge` | 4 | 16 GiB | x86_64 | Larger general-purpose workloads |
+| `t2.2xlarge` | 8 | 32 GiB | x86_64 | Higher-memory general-purpose workloads |
+| `t3.micro` | 2 | 1 GiB | x86_64 | Lightweight Linux servers |
+| `t3.small` | 2 | 2 GiB | x86_64 | Development and testing |
+| `t3.medium` | 2 | 4 GiB | x86_64 | Small web applications and APIs |
+| `t3.large` | 2 | 8 GiB | x86_64 | Moderate application workloads |
+| `t3.xlarge` | 4 | 16 GiB | x86_64 | Larger application workloads |
+| `t3.2xlarge` | 8 | 32 GiB | x86_64 | Higher-capacity general-purpose workloads |
+| `t4g.micro` | 2 | 1 GiB | ARM64 | Lightweight ARM-compatible applications |
+| `t4g.small` | 2 | 2 GiB | ARM64 | Development and testing |
+| `t4g.medium` | 2 | 4 GiB | ARM64 | Small ARM-compatible applications |
+| `t4g.large` | 2 | 8 GiB | ARM64 | Moderate ARM-compatible workloads |
+
+*Specifications are based on AWS's published instance-type information. Availability and supported configurations vary by Region and platform. See the [AWS EC2 Instance Types documentation](https://aws.amazon.com/ec2/instance-types/) for the latest details.*
+
+### How do I choose the right instance?
+
+- **`t2.micro`:** A basic option for learning and lightweight workloads where it is available.
+- **`t3.micro`:** A small x86-based instance suitable for simple development tasks and lightweight services.
+- **`t3.small` or `t3.medium`:** Consider these when a workload needs more memory.
+- **`t4g.micro`:** Worth considering when the operating system and application support ARM64 architecture.
+- **Larger instances:** Use them when the workload's CPU, memory, or performance requirements justify the additional cost.
+
+### What is the difference between T2, T3, and T4g?
+
+**T2** is an older generation of burstable general-purpose instances. **T3** uses a newer x86-based platform, while **T4g** uses AWS Graviton2 processors with ARM64 architecture. T-series instances are designed for workloads with moderate average CPU usage and occasional spikes in demand.
+
+For more details, see the official AWS documentation:
+
+- [Amazon EC2 General Purpose Instances](https://aws.amazon.com/ec2/instance-types/general-purpose/)
+- [Amazon EC2 T3 Instances](https://aws.amazon.com/ec2/instance-types/t3/)
+
+One detail worth understanding is that vCPU counts do not always indicate the same physical CPU configuration. For example, `t2.micro` has 1 vCPU, while `t3.micro` has 2 vCPUs, but both provide 1 GiB of memory.
+
+### Important: Check pricing before launching
+
+The cheapest suitable instance depends on the Region, operating system, pricing model, storage, and other resources. A small instance is not automatically free, and free-tier eligibility depends on the applicable AWS account and offer.
+
+Before launching an instance, check its current price and availability in the [official AWS EC2 instance types documentation](https://docs.aws.amazon.com/ec2/latest/instancetypes/). Also remember that EBS storage and other associated resources may continue to incur charges when an instance is stopped.
+
+For this tutorial, I would choose a suitable small instance for learning, verify the cost in the AWS console, and terminate it when it is no longer needed.
+
+# Step 6: Create or select an SSH key pair
+
+An SSH key pair allows me to authenticate to a Linux instance without relying on a password-based SSH login.
+
+Under the key pair section, I can either select an existing key pair or create a new one.
+
+If I create a new key pair, I provide a recognizable name, such as:
+
+```text
+web-server-key
+```
+
+I choose a supported private-key format, such as `.pem`, for use with a compatible SSH client.
+
+AWS provides the private key for download when the key pair is created.
+
+**Important:** I protect this private key carefully.
+
+I never upload it to a public Git repository, include it in a Docker image, or share it through an unsecured channel.
+
+If I lose the private key, I cannot simply download the same private key from AWS again. I need an appropriate recovery or access-management procedure.
+
+On a Linux or macOS machine, I can restrict its permissions:
+
+```bash
+chmod 400 web-server-key.pem
+```
+
+This helps ensure that the private key is readable only by its owner.
+
+On Windows, I use an appropriate SSH client and ensure the key file is protected by suitable filesystem permissions.
+
+# Step 7: Configure network settings
+
+Networking determines how the EC2 instance communicates with other resources and whether it can be reached from the internet.
+
+For a basic public web server, I review the following settings:
+
+- VPC
+- Subnet
+- Auto-assign public IP
+- Security group
+
+For a learning environment, the default VPC may be sufficient if it is configured appropriately.
+
+For a production environment, I prefer an explicitly designed VPC and subnet layout that reflects the application's security and availability requirements.
+
+![AWS EC2 networking and SSH connection](../assets/blog-posts/aws-ec2-networking-ssh.png)
+
+## Configure the security group
+
+A security group acts as a virtual firewall for the instance.
+
+For an SSH-based administration example, I might configure this inbound rule:
+
+| Type | Protocol | Port | Source |
+|---|---|---|---|
+| SSH | TCP | 22 | My trusted public IP address |
+
+I avoid opening SSH to `0.0.0.0/0` unless there is a specific, carefully controlled reason.
+
+Allowing SSH from every IPv4 address increases exposure to scanning and brute-force attempts.
+
+If I plan to host a public website, I can later add appropriate HTTP and HTTPS rules:
+
+| Type | Protocol | Port | Source |
+|---|---|---|---|
+| HTTP | TCP | 80 | `0.0.0.0/0` |
+| HTTPS | TCP | 443 | `0.0.0.0/0` |
+
+These rules are appropriate for a publicly accessible website, but I do not open these ports unnecessarily.
+
+I also remember that security groups alone do not guarantee connectivity. The subnet route table, internet gateway, public IP configuration, network ACLs, and operating-system firewall can all affect access.
+
+# Step 8: Configure storage
+
+The storage section allows me to configure the root Amazon Elastic Block Store (EBS) volume.
+
+For a basic Linux instance, the default root volume may be enough for initial testing.
+
+Before launching, I review:
+
+- Volume size
+- Volume type
+- Encryption settings
+- Delete-on-termination behavior
+
+EBS volumes can persist independently of an instance, depending on their configuration and lifecycle.
+
+For important workloads, I plan backups and snapshots instead of relying on the instance itself as the only copy of application data.
+
+Storage also contributes to the total running cost, so I avoid allocating unnecessary capacity.
+
+# Step 9: Review and launch the instance
+
+Before launching, I review the complete configuration.
+
+My checklist includes:
+
+```text
+[ ] Correct AWS account and Region
+[ ] Appropriate AMI selected
+[ ] Suitable instance type selected
+[ ] SSH key pair configured
+[ ] Security group reviewed
+[ ] Networking configured correctly
+[ ] Storage size and settings reviewed
+[ ] Estimated costs considered
+```
+
+Once everything looks correct, I select **Launch instance**.
+
+AWS begins provisioning the virtual server.
+
+I then open the EC2 Instances page and wait for the instance to reach the `Running` state.
+
+I also check the instance status checks before attempting to connect.
+
+A running instance is a useful first milestone, but it does not automatically mean that every service inside the operating system is healthy.
+
+# Step 10: Connect to the EC2 instance using SSH
+
+Once the instance is running and the required networking is available, I locate its public IPv4 address or public DNS name in the EC2 console.
+
+For an Ubuntu instance, I can connect from a terminal using:
+
+```bash
+ssh -i web-server-key.pem ubuntu@YOUR_PUBLIC_IP
+```
+
+I replace `YOUR_PUBLIC_IP` with the actual public IP address assigned to my instance.
+
+The default SSH username depends on the selected AMI. For Ubuntu images, the usual username is `ubuntu`; Amazon Linux commonly uses `ec2-user`.
+
+If the connection succeeds, I should see a remote shell prompt.
+
+If it fails, I investigate the actual cause instead of repeatedly retrying the same command.
+
+Common checks include:
+
+- Confirming that the instance has a reachable public IP address
+- Checking the security group's SSH rule
+- Verifying the private key and its permissions
+- Confirming the correct SSH username
+- Checking the subnet route table and internet gateway
+- Confirming that the SSH service is running and the instance is healthy
+
+For private instances, I use an appropriate access path such as a bastion host, VPN, or AWS Systems Manager Session Manager instead of exposing SSH directly to the internet.
+
+# Step 11: Verify the server
+
+After connecting, I run a few basic Linux commands to confirm that the instance is operating correctly.
+
+Check the hostname:
+
+```bash
+hostname
+```
+
+Check the operating system:
+
+```bash
+cat /etc/os-release
+```
+
+Check the kernel:
+
+```bash
+uname -r
+```
+
+Check CPU and memory:
+
+```bash
+lscpu
+free -h
+```
+
+Check filesystem usage:
+
+```bash
+df -h
+```
+
+Check system uptime:
+
+```bash
+uptime
+```
+
+These commands provide a quick overview of the operating system, available resources, disk usage, and system runtime.
+
+At this stage, I have successfully created and accessed a Linux server in AWS.
+
+# Step 12: Install and test Nginx
+
+To demonstrate that the instance can run an application service, I install Nginx on Ubuntu.
+
+Update the package index:
+
+```bash
+sudo apt update
+```
+
+Install Nginx:
+
+```bash
+sudo apt install -y nginx
+```
+
+Enable and start the service:
+
+```bash
+sudo systemctl enable --now nginx
+```
+
+Check the service status:
+
+```bash
+sudo systemctl status nginx
+```
+
+Test the HTTP response locally from the instance:
+
+```bash
+curl -I http://localhost
+```
+
+If Nginx is running correctly, the response should indicate that the HTTP request was handled successfully.
+
+To access the default web page externally, I ensure that the security group permits inbound HTTP traffic on port 80 and that the network configuration allows public access.
+
+Then I open the following URL in my browser:
+
+```text
+http://YOUR_PUBLIC_IP
+```
+
+If everything is configured correctly, the default Nginx welcome page should appear.
+
+This validates more than instance creation alone: it demonstrates that the operating system, web server, and network path are working together.
+
+# Common problems and troubleshooting
+
+Launching an EC2 instance is usually straightforward. Troubleshooting becomes easier when I isolate the failing layer.
+
+| Problem | What I check |
+|---|---|
+| SSH connection times out | Security group, route table, public IP, network ACL, and reachability |
+| Permission denied (publickey) | SSH username, private key, and authorized-key configuration |
+| Website is not accessible | Nginx status, port 80 rule, host firewall, and public networking |
+| Instance status checks fail | AWS status-check details, system logs, and instance health |
+| Disk space is low | `df -h`, application logs, and EBS volume configuration |
+| Unexpected AWS charges | Instance state, storage, public IPv4 usage, data transfer, and other billable resources |
+
+The key lesson is to identify the layer that is failing before making changes.
+
+For example, installing Nginx again will not solve an SSH timeout caused by an incorrect security group.
+
+# Security practices I follow
+
+A cloud server should not be considered production-ready simply because it is accessible.
+
+I pay attention to the following practices:
+
+- Restrict SSH access to trusted sources or use a managed access method.
+- Store private keys securely and never commit them to source control.
+- Apply operating-system security updates.
+- Use IAM roles for AWS access from applications and instances where appropriate.
+- Avoid hardcoding AWS access keys or passwords in scripts.
+- Enable appropriate logging and monitoring.
+- Back up important data and test recovery procedures.
+- Review security groups and remove unnecessary inbound rules.
+- Use encryption and least-privilege permissions where appropriate.
+
+For production systems, I also evaluate private subnets, Systems Manager, centralized logging, monitoring alerts, patch management, and infrastructure-as-code workflows.
+
+# Do not forget AWS costs
+
+An EC2 instance can generate costs beyond its compute runtime.
+
+Depending on the configuration and applicable pricing, charges may include:
+
+- EC2 compute usage
+- EBS storage and provisioned performance
+- Public IPv4 address usage
+- Data transfer
+- Additional monitoring or related AWS services
+
+Stopping an instance generally stops its normal instance compute charges, but it does not automatically remove every associated cost. EBS volumes and other resources may continue to incur charges.
+
+If I have finished testing and no longer need the server, I terminate the instance after confirming that I do not need its data.
+
+I also review whether associated volumes, snapshots, elastic IP addresses, or other resources should be retained or deleted.
+
+Before creating resources, I check the current AWS pricing and any applicable free-tier eligibility rather than assuming the workload will cost nothing.
+
+# How I would automate this process
+
+Creating an EC2 instance manually is a useful way to understand AWS fundamentals.
+
+However, repeating the same console steps across development, staging, and production environments becomes difficult to maintain.
+
+For a repeatable deployment, I can use Terraform to define the infrastructure.
+
+![AWS EC2 DevOps automation workflow](../assets/blog-posts/aws-ec2-devops-automation.png)
+
+For example:
+
+```text
+Terraform
+├── VPC
+├── Subnets
+├── Security Groups
+├── EC2 Instance
+├── IAM Resources
+└── EBS Configuration
+```
+
+After Terraform provisions the infrastructure, Ansible can configure the operating system and install the required services.
+
+A CI/CD pipeline can coordinate the workflow:
+
+```text
+Git Repository
+      ↓
+Terraform Validate
+      ↓
+Terraform Plan
+      ↓
+Terraform Apply
+      ↓
+Ansible Configuration
+      ↓
+Application Deployment
+      ↓
+Health Checks
+```
+
+This approach makes the infrastructure easier to reproduce, review, and maintain.
+
+For production use, I would also protect Terraform state, control who can approve infrastructure changes, and avoid exposing private keys or credentials in pipeline logs.
+
+# Final thoughts
+
+Creating an EC2 instance is one of the fundamental tasks in AWS cloud administration, but the real skill is understanding what happens around the instance.
+
+I need to know how the AMI, instance type, networking, security groups, SSH authentication, storage, and operating system work together.
+
+Once these fundamentals are clear, I can move from manually creating servers to managing infrastructure through Terraform, configuring systems through Ansible, and automating deployments through CI/CD.
+
+My practical rule is simple:
+
+**Launch the instance, secure the access path, verify the operating system, validate the application, and automate the process when it needs to be repeated.**
+
+That is how a basic EC2 exercise becomes a useful foundation for real-world cloud and DevOps engineering.
