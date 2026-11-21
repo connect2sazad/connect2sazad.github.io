@@ -145,10 +145,31 @@ const STATIC_CONTENT = {
         "platform": "GitLab",
         "description": "AWS infrastructure provisioned with Terraform, with Prometheus, Grafana and Alertmanager deployed using Ansible and Docker through a GitLab CI/CD pipeline.",
         "tags": [
+          "AWS",
           "Terraform",
           "Ansible",
+          "Gitlab CI/CD",
           "Docker",
+          "Docker Compose",
+          "Prometheus",
           "Grafana"
+        ]
+      },
+      {
+        "title": "Blue-Green Deployment",
+        "url": "https://gitlab.com/connect2sazad/blue-green-deployment",
+        "platform": "GitLab",
+        "description": "Setting up a blue-green deployment strategy for a simple web application. This will allow you to deploy your application in a more efficient and reliable way.",
+        "tags": [
+          "AWS",
+          "Python",
+          "Gitlab CI/CD",
+          "Docker",
+          "Docker Compose",
+          "Prometheus",
+          "Grafana",
+          "Blue-Green",
+          "Deployment",
         ]
       },
       {
@@ -158,6 +179,9 @@ const STATIC_CONTENT = {
         "description": "Repeatable AWS deployment for WordPress on Linux with Nginx, PHP-FPM and MySQL using Terraform, Ansible and Docker.",
         "tags": [
           "AWS",
+          "Terraform",
+          "Ansible",
+          "Gitlab CI/CD",
           "Nginx",
           "PHP-FPM",
           "MySQL"
